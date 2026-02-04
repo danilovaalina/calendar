@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -100,10 +101,16 @@ func (d *Date) UnmarshalJSON(b []byte) error {
 	return err
 }
 
+func (d Date) MarshalJSON() ([]byte, error) {
+	// Преобразуем Date обратно в time.Time, форматируем и оборачиваем в кавычки
+	formatted := fmt.Sprintf("\"%s\"", time.Time(d).Format("2006-01-02"))
+	return []byte(formatted), nil
+}
+
 type createEventRequest struct {
 	UserID uuid.UUID `form:"user_id" json:"user_id" validate:"required"`
-	Date   Date      `form:"date" json:"date" validate:"required"` // Теперь парсится само
-	Text   string    `form:"text" json:"text" validate:"required"`
+	Date   Date      `form:"date" json:"date" validate:"required"`
+	Event  string    `form:"event" json:"event" validate:"required"`
 }
 
 type response struct {
@@ -113,18 +120,18 @@ type response struct {
 
 func (a *API) createEvent(c *echo.Context) error {
 	var req createEventRequest
-	if err := c.Bind(req); err != nil {
+	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, response{Reason: "invalid request format or params"})
 	}
 
-	if err := c.Validate(req); err != nil {
+	if err := c.Validate(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, response{Reason: "user_id, date and text are required fields"})
 	}
 
 	event := model.Event{
 		UserID: req.UserID,
 		Date:   time.Time(req.Date),
-		Text:   req.Text,
+		Text:   req.Event,
 	}
 
 	e, err := a.service.CreateEvent(c.Request().Context(), event)
@@ -139,16 +146,16 @@ type updateEventRequest struct {
 	ID     uuid.UUID `form:"id" json:"id" validate:"required"`
 	UserID uuid.UUID `form:"user_id" json:"user_id" validate:"required"`
 	Date   Date      `form:"date" json:"date" validate:"required"`
-	Text   string    `form:"text" json:"text" validate:"required"`
+	Event  string    `form:"event" json:"event" validate:"required"`
 }
 
 func (a *API) updateEvent(c *echo.Context) error {
 	var req updateEventRequest
-	if err := c.Bind(req); err != nil {
+	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, response{Reason: "invalid request format or params"})
 	}
 
-	if err := c.Validate(req); err != nil {
+	if err := c.Validate(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, response{Reason: "id, user_id, date and text are required fields"})
 	}
 
@@ -156,7 +163,7 @@ func (a *API) updateEvent(c *echo.Context) error {
 		ID:     req.ID,
 		UserID: req.UserID,
 		Date:   time.Time(req.Date),
-		Text:   req.Text,
+		Text:   req.Event,
 	}
 
 	e, err := a.service.UpdateEvent(c.Request().Context(), event)
@@ -177,11 +184,11 @@ type deleteEventRequest struct {
 
 func (a *API) deleteEvent(c *echo.Context) error {
 	var req deleteEventRequest
-	if err := c.Bind(req); err != nil {
+	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, response{Reason: "invalid request format or params"})
 	}
 
-	if err := c.Validate(req); err != nil {
+	if err := c.Validate(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, response{Reason: "id and user_id are required fields"})
 	}
 
@@ -208,11 +215,11 @@ type eventsRequest struct {
 
 func (a *API) eventsForDay(c *echo.Context) error {
 	var req eventsRequest
-	if err := c.Bind(req); err != nil {
+	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, response{Reason: "invalid request format or params"})
 	}
 
-	if err := c.Validate(req); err != nil {
+	if err := c.Validate(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, response{Reason: "user_id and date are required"})
 	}
 
@@ -226,11 +233,11 @@ func (a *API) eventsForDay(c *echo.Context) error {
 
 func (a *API) eventsForWeek(c *echo.Context) error {
 	var req eventsRequest
-	if err := c.Bind(req); err != nil {
+	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, response{Reason: "invalid request format or params"})
 	}
 
-	if err := c.Validate(req); err != nil {
+	if err := c.Validate(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, response{Reason: "user_id and date are required"})
 	}
 
@@ -244,11 +251,11 @@ func (a *API) eventsForWeek(c *echo.Context) error {
 
 func (a *API) eventsForMonth(c *echo.Context) error {
 	var req eventsRequest
-	if err := c.Bind(req); err != nil {
+	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, response{Reason: "invalid request format or params"})
 	}
 
-	if err := c.Validate(req); err != nil {
+	if err := c.Validate(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, response{Reason: "user_id and date are required"})
 	}
 

@@ -15,6 +15,8 @@ func Load() (*Config, error) {
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(".")
 
+	viper.SetDefault("addr", ":8080")
+
 	if err := viper.ReadInConfig(); err != nil {
 		if !errors.Is(err, viper.ConfigFileNotFoundError{}) {
 			return nil, errors.Wrap(err, "error reading config file")
