@@ -10,8 +10,9 @@ import (
 )
 
 type Repository struct {
-	mu     sync.RWMutex
-	events map[uuid.UUID]model.Event
+	mu      sync.RWMutex
+	events  map[uuid.UUID]model.Event
+	archive map[uuid.UUID]model.Event
 }
 
 func New() *Repository {
@@ -75,4 +76,16 @@ func (r *Repository) GetByID(_ context.Context, id uuid.UUID) (model.Event, erro
 		return model.Event{}, model.ErrEventNotFound
 	}
 	return e, nil
+}
+
+func (r *Repository) ArchiveEvents(_ context.Context, now time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for id, event := range r.events {
+		if event.Date.Before(now) {
+			r.archive[id] = event
+			delete(r.events, id)
+		}
+	}
 }

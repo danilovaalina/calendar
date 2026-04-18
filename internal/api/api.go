@@ -4,17 +4,16 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/danilovaalina/calendar/internal/logger"
 	"github.com/danilovaalina/calendar/internal/model"
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
-	"github.com/rs/zerolog/log"
 )
 
 type Service interface {
@@ -26,40 +25,26 @@ type Service interface {
 	EventsForMonth(ctx context.Context, userID uuid.UUID, date time.Time) ([]model.Event, error)
 }
 
-type Option func(*API)
-
-// WithLogFile - это функция-опция, которая конфигурирует API для записи логов в указанный файл.
-func WithLogFile(filePath string) Option {
-	return func(a *API) {
-		if filePath != "" {
-			file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
-			if err == nil {
-				log.Logger = log.Output(file)
-			} else {
-				log.Error().Err(err).Msgf("failed to open log file %s, using stdout: %v\\n\", filePath, err")
-			}
-		}
-	}
+type Logger interface {
+	Log(log logger.Log)
 }
 
 type API struct {
 	*echo.Echo
 	service Service
+	logger  Logger
 }
 
-func New(svc Service, opts ...Option) *API {
+func New(svc Service, l Logger) *API {
 	api := &API{
 		Echo:    echo.New(),
 		service: svc,
+		logger:  l,
 	}
 	api.Validator = &CustomValidator{validator: validator.New()}
 
-	for _, opt := range opts {
-		opt(api)
-	}
-
 	// Middleware логирования
-	api.Use(LoggerMiddleware())
+	api.Use(api.LoggerMiddleware())
 
 	// Routes
 	api.POST("/create_event", api.createEvent)
@@ -72,13 +57,20 @@ func New(svc Service, opts ...Option) *API {
 	return api
 }
 
-func LoggerMiddleware() echo.MiddlewareFunc {
+func (a *API) LoggerMiddleware() echo.MiddlewareFunc {
 	return middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
 		LogMethod:  true,
 		LogURI:     true,
 		LogLatency: true,
+		LogStatus:  true,
 		LogValuesFunc: func(c *echo.Context, v middleware.RequestLoggerValues) error {
-			log.Info().Msgf("request method: %s, URI: %s, latency: %v\n", v.Method, v.URI, v.Latency)
+			// Отправляем структурированные данные в канал
+			a.logger.Log(logger.Log{
+				Method:  v.Method,
+				URI:     v.URI,
+				Latency: v.Latency,
+				Status:  v.Status,
+			})
 			return nil
 		},
 	})
@@ -86,14 +78,14 @@ func LoggerMiddleware() echo.MiddlewareFunc {
 
 type Date time.Time
 
-// Для Form/Query параметров
+// UnmarshalParam Для Form/Query параметров
 func (d *Date) UnmarshalParam(src string) error {
 	t, err := time.Parse("2006-01-02", src)
 	*d = Date(t)
 	return err
 }
 
-// Для JSON тела запроса
+// UnmarshalJSON Для JSON тела запроса
 func (d *Date) UnmarshalJSON(b []byte) error {
 	s := strings.Trim(string(b), "\"")
 	t, err := time.Parse("2006-01-02", s)
@@ -101,16 +93,19 @@ func (d *Date) UnmarshalJSON(b []byte) error {
 	return err
 }
 
-func (d Date) MarshalJSON() ([]byte, error) {
+func (d *Date) MarshalJSON() ([]byte, error) {
 	// Преобразуем Date обратно в time.Time, форматируем и оборачиваем в кавычки
-	formatted := fmt.Sprintf("\"%s\"", time.Time(d).Format("2006-01-02"))
+	formatted := fmt.Sprintf("\"%s\"", time.Time(*d).Format("2006-01-02"))
 	return []byte(formatted), nil
 }
 
 type createEventRequest struct {
-	UserID uuid.UUID `form:"user_id" json:"user_id" validate:"required"`
-	Date   Date      `form:"date" json:"date" validate:"required"`
-	Event  string    `form:"event" json:"event" validate:"required"`
+	UserID    uuid.UUID `form:"user_id" json:"user_id" validate:"required"`
+	Date      Date      `form:"date" json:"date" validate:"required"`
+	Event     string    `form:"event" json:"event" validate:"required"`
+	Channel   string    `json:"channel"`
+	Recipient string    `json:"recipient"`
+	RemindAt  time.Time `json:"remind_at"`
 }
 
 type response struct {
@@ -132,6 +127,14 @@ func (a *API) createEvent(c *echo.Context) error {
 		UserID: req.UserID,
 		Date:   time.Time(req.Date),
 		Text:   req.Event,
+	}
+
+	if !req.RemindAt.IsZero() {
+		event.Notification = model.NotificationSettings{
+			Channel:   req.Channel,
+			Recipient: req.Recipient,
+			RemindAt:  req.RemindAt,
+		}
 	}
 
 	e, err := a.service.CreateEvent(c.Request().Context(), event)

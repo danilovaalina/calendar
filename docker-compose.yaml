@@ -1,0 +1,30 @@
+services:
+  calendar:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: calendar
+    restart: always
+    ports:
+      - "8082:8082" # Доступ к календарю снаружи по порту 8082
+    environment:
+      # Настройки сервера
+      - ADDR=:8082
+      # Ссылка на notifier.
+      - NOTIFIER_URL=http://notifier:8081
+      # Настройки фоновых процессов
+      - BUFFER_SIZE=100
+      - INTERVAL=5m
+      # Логирование
+      - LOG_FILE=calendar.log
+    networks:
+      - shared_net
+      - calendar_net
+networks:
+  # Подключаемся к уже существующей сети нотификатора
+  shared_net:
+    external: true
+    name: calendar_shared_net
+  # Внутренняя сеть только для календаря (на будущее, например для его БД)
+  calendar_net:
+    driver: bridge

@@ -2,11 +2,18 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/danilovaalina/calendar/internal/model"
+	"github.com/danilovaalina/calendar/internal/notifier"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 )
+
+type NotifierClient interface {
+	Send(ctx context.Context, req notifier.CreateRequest) error
+}
 
 type Repository interface {
 	CreateEvent(ctx context.Context, event model.Event) error
@@ -14,14 +21,66 @@ type Repository interface {
 	DeleteEvent(ctx context.Context, id uuid.UUID) error
 	GetByUserIDAndDateRange(ctx context.Context, userID uuid.UUID, start, end time.Time) []model.Event
 	GetByID(ctx context.Context, id uuid.UUID) (model.Event, error)
+	ArchiveEvents(_ context.Context, now time.Time)
 }
 
 type Service struct {
-	repo Repository
+	repo      Repository
+	notifier  NotifierClient
+	reminders chan model.Event
 }
 
-func New(repo Repository) *Service {
-	return &Service{repo: repo}
+type Options struct {
+	Repo       Repository
+	Client     NotifierClient
+	BufferSize int
+}
+
+func New(opts Options) *Service {
+	return &Service{
+		repo:      opts.Repo,
+		notifier:  opts.Client,
+		reminders: make(chan model.Event, opts.BufferSize),
+	}
+}
+
+func (s *Service) RunNotifier(ctx context.Context) {
+	for {
+		select {
+		case event := <-s.reminders:
+			req := notifier.CreateRequest{
+				Channel:       event.Notification.Channel,
+				Recipient:     event.Notification.Recipient,
+				Message:       fmt.Sprintf("Напоминание: %s", event.Text),
+				ScheduledTime: event.Notification.RemindAt,
+			}
+
+			// Отправляем в Notifier асинхронно
+			err := s.notifier.Send(ctx, req)
+			if err != nil {
+				log.Warn().Err(err).Msg("logger is shutting down...")
+			}
+
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (s *Service) RunCleanup(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			s.repo.ArchiveEvents(ctx, time.Now())
+			log.Info().Msg("cleanup events")
+		case <-ctx.Done():
+			return
+		}
+	}
+
 }
 
 func (s *Service) CreateEvent(ctx context.Context, event model.Event) (model.Event, error) {
@@ -30,6 +89,10 @@ func (s *Service) CreateEvent(ctx context.Context, event model.Event) (model.Eve
 	err := s.repo.CreateEvent(ctx, event)
 	if err != nil {
 		return model.Event{}, err
+	}
+
+	if !event.Notification.RemindAt.IsZero() {
+		s.reminders <- event
 	}
 
 	return event, nil

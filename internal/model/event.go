@@ -14,8 +14,16 @@ var (
 )
 
 type Event struct {
-	ID     uuid.UUID
-	UserID uuid.UUID
-	Date   time.Time
-	Text   string
+	ID           uuid.UUID
+	UserID       uuid.UUID
+	Date         time.Time
+	Text         string
+	IsSent       bool
+	Notification NotificationSettings
+}
+
+type NotificationSettings struct {
+	Channel   string    // "telegram" или "email"
+	Recipient string    // ID чата или email адрес
+	RemindAt  time.Time // Время, когда Notifier должен сработать
 }
